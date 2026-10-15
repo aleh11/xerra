@@ -390,6 +390,12 @@ impl ShortcutAction for TranscribeAction {
         let start_time = Instant::now();
         debug!("TranscribeAction::start called for binding: {}", binding_id);
 
+        // Xerra: remember which app the user is dictating into (used to pick
+        // the cleanup style at stop). Captured off-thread; never blocks start.
+        if !self.post_process && get_settings(app).cleanup.enabled {
+            crate::cleanup::begin_context_capture(binding_id);
+        }
+
         // Load model in the background
         let tm = app.state::<Arc<TranscriptionManager>>();
         let rm = app.state::<Arc<AudioRecordingManager>>();
@@ -691,7 +697,25 @@ impl ShortcutAction for TranscribeAction {
                                 utils::redact_text(&transcription)
                             );
 
-                            if post_process {
+                            // Xerra: LLM/regex cleanup on the plain transcribe hotkey.
+                            let cleanup_enabled =
+                                !post_process && get_settings(&ah).cleanup.enabled;
+                            let cleanup_ctx = if cleanup_enabled {
+                                crate::cleanup::take_context(&binding_id).await
+                            } else {
+                                None
+                            };
+                            // Only show the processing overlay when an LLM call is
+                            // expected (decided on the raw transcript; cheap).
+                            let show_processing = post_process
+                                || (cleanup_enabled
+                                    && crate::cleanup::will_call_llm(
+                                        &get_settings(&ah).cleanup,
+                                        &transcription,
+                                        cleanup_ctx.as_ref(),
+                                    )
+                                    .await);
+                            if show_processing {
                                 if use_streaming_overlay {
                                     tm.emit_stream_working(StreamWorkKind::Polishing);
                                 } else {
@@ -699,7 +723,32 @@ impl ShortcutAction for TranscribeAction {
                                 }
                             }
                             let Some(processed) = complete_unless_cancelled(
-                                process_transcription_output(&ah, &transcription, post_process),
+                                async {
+                                    let mut processed = process_transcription_output(
+                                        &ah,
+                                        &transcription,
+                                        post_process,
+                                    )
+                                    .await;
+                                    if cleanup_enabled {
+                                        // Hook point: cleaned text replaces the pasted text;
+                                        // the raw transcription stays raw in history.
+                                        let outcome = crate::cleanup::run_for_app(
+                                            &ah,
+                                            &processed.final_text,
+                                            cleanup_ctx.as_ref(),
+                                        )
+                                        .await;
+                                        if outcome.source
+                                            != crate::cleanup::CleanupSource::Unchanged
+                                        {
+                                            processed.post_processed_text =
+                                                Some(outcome.text.clone());
+                                        }
+                                        processed.final_text = outcome.text;
+                                    }
+                                    processed
+                                },
                                 || rm.was_cancelled_since(cancel_generation),
                             )
                             .await

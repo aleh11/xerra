@@ -543,6 +543,42 @@ async showMainWindowCommand() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async setCleanupSettings(settings: CleanupSettings) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_cleanup_settings", { settings }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Restore the built-in app style rules and return the updated settings.
+ */
+async resetCleanupStyleRules() : Promise<Result<CleanupSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_cleanup_style_rules") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setCleanupApiKey(key: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_cleanup_api_key", { key }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async hasCleanupApiKey() : Promise<boolean> {
+    return await TAURI_INVOKE("has_cleanup_api_key");
+},
+/**
+ * Run cleanup on sample text, forcing the LLM path (no short-utterance bypass).
+ */
+async testCleanup(raw: string, style: CleanupStyle | null, appName: string | null, windowTitle: string | null) : Promise<CleanupTestResult> {
+    return await TAURI_INVOKE("test_cleanup", { raw, style, appName, windowTitle });
+},
 async cancelOperation() : Promise<void> {
     await TAURI_INVOKE("cancel_operation");
 },
@@ -1017,6 +1053,10 @@ selected_channel?: number | null; clamshell_microphone?: string | null; selected
  */
 reliable_paste?: boolean; typing_tool?: TypingTool; external_script_path?: string | null; filler_word_removal_enabled?: boolean; custom_filler_words?: string[] | null; 
 /**
+ * Xerra: LLM dictation cleanup settings.
+ */
+cleanup?: CleanupSettings; 
+/**
  * Fresh installs default from the OS locale; existing stores are migrated
  * in `apply_settings_migrations`.
  */
@@ -1043,6 +1083,15 @@ long_form_chunking?: boolean;
  * `overlay_position` (position `none` → style `None`).
  */
 overlay_style?: OverlayStyle }
+export type AppStyleRule = { 
+/**
+ * Case-insensitive substring, or case-insensitive equality when `exact`.
+ */
+pattern: string; field: MatchField; style: CleanupStyle; 
+/**
+ * Match the whole field value instead of a substring.
+ */
+exact?: boolean }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { transcribe: string[]; gpu_devices: GpuDeviceOption[] }
@@ -1056,6 +1105,26 @@ export type ChineseScript =
  * Keep whatever script the model produced.
  */
 "as_transcribed" | "simplified" | "traditional"
+export type CleanupSettings = { enabled?: boolean; base_url?: string; model?: string; 
+/**
+ * One of "none" | "minimal" | "low" | "medium" | "high".
+ */
+reasoning_effort?: string; timeout_ms?: number; short_utterance_words?: number; app_style_rules?: AppStyleRule[]; default_style?: CleanupStyle; 
+/**
+ * Known terms (names, jargon) always sent to the LLM as vocabulary.
+ */
+dictionary?: string[]; 
+/**
+ * Deterministic replacements applied before the LLM and regex steps.
+ */
+replacements?: Replacement[]; 
+/**
+ * Whole-utterance voice shortcuts; skip the LLM entirely.
+ */
+snippets?: Snippet[] }
+export type CleanupSource = "Llm" | "Regex" | "Unchanged" | "Snippet"
+export type CleanupStyle = "Neutral" | "Casual" | "Formal" | "Code"
+export type CleanupTestResult = { output: string; source: CleanupSource; style: CleanupStyle; latency_ms: number; error: string | null }
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
@@ -1077,6 +1146,7 @@ key_down: number; key_up: number; flags_changed: number; mouse: number; duration
 export type KeyboardImplementation = "tauri" | "handy_keys"
 export type LLMPrompt = { id: string; name: string; prompt: string }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
+export type MatchField = "AppName" | "BundleId" | "WindowTitle"
 export type ModelInfo = { id: string; name: string; description: string; filename: string; source: ModelSource; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean; supports_streaming: boolean; supports_language_detection: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 /**
@@ -1133,6 +1203,10 @@ export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "
 /**
  * A retired ONNX model found on disk.
  */
+/**
+ * "Heard as -> write as" pair for a recurring mis-transcription.
+ */
+export type Replacement = { heard: string; write: string }
 export type RetiredModel = { id: string; name: string; size_mb: number; replacement_repo: string }
 export type SecretMap = Partial<{ [key in string]: string }>
 export type SecureInputStatus = { 
@@ -1186,6 +1260,14 @@ export type ShortcutActivation =
  */
 "hold_or_toggle"
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
+/**
+ * Voice shortcut: saying exactly `trigger` pastes `expansion` verbatim.
+ */
+export type Snippet = { trigger: string; 
+/**
+ * May contain newlines.
+ */
+expansion: string }
 export type SoundTheme = "marimba" | "pop" | "custom"
 /**
  * Phase of the streaming overlay card, emitted to drive its UI state.
