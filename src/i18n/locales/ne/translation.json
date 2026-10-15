@@ -16,7 +16,8 @@
     "postProcessing": "पोस्ट प्रोसेस",
     "history": "हिस्ट्री",
     "debug": "डिबग",
-    "about": "बारेमा"
+    "about": "बारेमा",
+    "cleanup": "Cleanup"
   },
   "onboarding": {
     "subtitle": "सुरु गर्न, एउटा ट्रान्सक्रिप्सन मोडेल छान्नुहोस्",
@@ -625,6 +626,143 @@
           "description": "अन-डिभाइस मेसिन लर्निङ अनुमानका लागि उच्च-प्रदर्शन टेन्सर लाइब्रेरी",
           "details": "Handy को स्थानीय स्पिच-टु-टेक्स्ट transcribe.cpp र ggml मा आधारित छ। Georgi Gerganov र योगदानकर्ताहरूको उत्कृष्ट कामका लागि धन्यवाद।"
         }
+      }
+    },
+    "cleanup": {
+      "general": {
+        "title": "LLM Cleanup"
+      },
+      "saveError": "Failed to save cleanup settings: {{error}}",
+      "enable": {
+        "label": "Enable Cleanup",
+        "description": "Clean up dictation with an LLM before pasting. Falls back to basic cleanup when offline or on error."
+      },
+      "apiKey": {
+        "title": "OpenRouter API Key",
+        "description": "Used to call the cleanup model. The key is never shown again once saved.",
+        "placeholder": "sk-or-...",
+        "save": "Save",
+        "clear": "Clear",
+        "stored": "Key stored in system keychain",
+        "none": "No key set",
+        "error": "Failed to update API key: {{error}}"
+      },
+      "model": {
+        "title": "Model",
+        "description": "Any OpenRouter model slug works, e.g. anthropic/claude-haiku-5.5 or openai/gpt-5-mini."
+      },
+      "reasoningEffort": {
+        "title": "Reasoning Effort",
+        "description": "How much the model thinks before answering. Lower is faster and cheaper.",
+        "options": {
+          "none": "None",
+          "minimal": "Minimal",
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High"
+        }
+      },
+      "timeout": {
+        "title": "Timeout (ms)",
+        "description": "How long to wait for the model before falling back to basic cleanup.",
+        "error": "Enter a whole number from {{min}} to {{max}}"
+      },
+      "shortUtterance": {
+        "title": "Short-Utterance Threshold (words)",
+        "description": "Utterances shorter than this skip the LLM and use basic cleanup only. Set to 0 to always use the LLM.",
+        "error": "Enter a whole number from {{min}} to {{max}}"
+      },
+      "advanced": {
+        "title": "Advanced"
+      },
+      "baseUrl": {
+        "title": "Base URL",
+        "description": "OpenAI-compatible API endpoint. Leave as the OpenRouter default unless you run a proxy."
+      },
+      "styles": {
+        "title": "App Styles",
+        "Neutral": "Neutral",
+        "Casual": "Casual",
+        "Formal": "Formal",
+        "Code": "Code"
+      },
+      "defaultStyle": {
+        "title": "Default Style",
+        "description": "Style used when no app rule matches."
+      },
+      "appStyles": {
+        "title": "App Style Rules",
+        "description": "Pick a cleanup style based on the app you are dictating into.",
+        "firstMatchNote": "Rules are checked from top to bottom and the first match wins. \"Exact\" requires the whole value to match instead of a substring. Matching is case-insensitive.",
+        "empty": "No rules. The default style is always used.",
+        "pattern": "Match pattern",
+        "patternPlaceholder": "e.g. slack",
+        "fields": {
+          "AppName": "App name",
+          "BundleId": "Bundle ID",
+          "WindowTitle": "Window title"
+        },
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "delete": "Delete rule",
+        "add": "Add Rule",
+        "exact": "Exact",
+        "reset": "Reset to Defaults",
+        "resetError": "Failed to reset rules: {{error}}"
+      },
+      "test": {
+        "groupTitle": "Test Cleanup",
+        "title": "Try It",
+        "description": "Run a sample through the cleanup pipeline. This always calls the LLM, ignoring the short-utterance threshold.",
+        "rawLabel": "Raw dictation",
+        "rawPlaceholder": "um so like I wanted to uh send the report tomorrow",
+        "styleAuto": "Auto",
+        "appName": "App name (optional)",
+        "windowTitle": "Window title (optional)",
+        "run": "Run",
+        "running": "Running...",
+        "style": "Style: {{style}}",
+        "latency": "{{ms}} ms",
+        "error": "Error: {{error}}",
+        "copy": "Copy output",
+        "copyError": "Failed to copy to clipboard",
+        "failed": "Test failed: {{error}}",
+        "sources": {
+          "Llm": "LLM",
+          "Regex": "Basic cleanup",
+          "Unchanged": "Unchanged",
+          "Snippet": "Snippet"
+        }
+      },
+      "personal": {
+        "title": "Dictionary & Snippets"
+      },
+      "dictionary": {
+        "title": "Dictionary",
+        "description": "Names, product terms and jargon the model should spell correctly.",
+        "placeholder": "e.g. Kubernetes",
+        "add": "Add",
+        "empty": "No terms yet.",
+        "remove": "Remove {{term}}",
+        "duplicate": "\"{{term}}\" is already in the dictionary"
+      },
+      "replacements": {
+        "title": "Replacements",
+        "description": "Always rewrite a recurring mis-transcription. Applied before the LLM runs.",
+        "heard": "Heard as",
+        "write": "Write as",
+        "add": "Add Replacement",
+        "delete": "Delete replacement",
+        "empty": "No replacements yet."
+      },
+      "snippets": {
+        "title": "Snippets",
+        "description": "Saying exactly the trigger phrase pastes the expansion verbatim, without calling the LLM.",
+        "trigger": "Trigger phrase",
+        "expansion": "Expansion (can span multiple lines)",
+        "add": "Add Snippet",
+        "delete": "Delete snippet",
+        "empty": "No snippets yet."
       }
     }
   },
