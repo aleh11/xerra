@@ -7,6 +7,7 @@ pub mod audio_toolkit;
 mod autostart;
 mod catalog;
 mod chinese_script;
+mod cleanup;
 pub mod cli;
 mod clipboard;
 mod commands;
@@ -715,6 +716,10 @@ pub fn run(cli_args: CliArgs) {
             secure_input::run_keyboard_diagnostic,
             trigger_update_check,
             show_main_window_command,
+            cleanup::set_cleanup_settings,
+            cleanup::set_cleanup_api_key,
+            cleanup::has_cleanup_api_key,
+            cleanup::test_cleanup,
             commands::cancel_operation,
             commands::is_portable,
             commands::is_update_checks_locked,
