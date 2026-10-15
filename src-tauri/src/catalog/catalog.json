@@ -36,7 +36,7 @@
       ],
       "default_quant": "Q8_0",
       "recommended": true,
-      "recommended_rank": 1
+      "recommended_rank": 2
     },
     {
       "id": "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
@@ -69,7 +69,7 @@
       ],
       "default_quant": "Q8_0",
       "recommended": true,
-      "recommended_rank": 2
+      "recommended_rank": 3
     },
     {
       "id": "handy-computer/canary-180m-flash-gguf",
@@ -102,7 +102,7 @@
       ],
       "default_quant": "Q8_0",
       "recommended": true,
-      "recommended_rank": 3
+      "recommended_rank": 4
     },
     {
       "id": "handy-computer/cohere-transcribe-03-2026-gguf",
@@ -135,7 +135,7 @@
       ],
       "default_quant": "Q5_K_M",
       "recommended": true,
-      "recommended_rank": 4
+      "recommended_rank": 5
     },
     {
       "id": "handy-computer/whisper-medium-gguf",
@@ -168,7 +168,7 @@
       ],
       "default_quant": "Q8_0",
       "recommended": true,
-      "recommended_rank": 5
+      "recommended_rank": 6
     },
     {
       "id": "handy-computer/Voxtral-Mini-4B-Realtime-2602-gguf",
@@ -201,7 +201,7 @@
       ],
       "default_quant": "Q5_K_M",
       "recommended": false,
-      "recommended_rank": 6
+      "recommended_rank": 7
     },
     {
       "id": "handy-computer/parakeet-tdt-0.6b-v3-gguf",
@@ -234,7 +234,7 @@
       ],
       "default_quant": "Q8_0",
       "recommended": false,
-      "recommended_rank": 7
+      "recommended_rank": 8
     },
     {
       "id": "handy-computer/parakeet-tdt-0.6b-v2-gguf",
@@ -266,8 +266,8 @@
         {"filename": "parakeet-tdt-0.6b-v2-F32.gguf", "quant": "F32", "size_bytes": 2471550272, "sha256": "501ba1e61965cdb28689614c648d2c560d75895b47a2948b9010b4e8c9cf1325"}
       ],
       "default_quant": "Q8_0",
-      "recommended": false,
-      "recommended_rank": 8
+      "recommended": true,
+      "recommended_rank": 1
     },
     {
       "id": "handy-computer/Qwen3-ASR-0.6B-gguf",
