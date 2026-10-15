@@ -62,9 +62,10 @@ pub fn build_request_body(
     })
 }
 
-/// `input_chars / 2 + 256`, capped at 4096.
+/// `input_chars / 2 + 1024`, capped at 8192. The headroom covers reasoning
+/// tokens, which count against `max_tokens` when effort is above "none".
 pub fn max_tokens_for(input_chars: usize) -> u32 {
-    (input_chars / 2 + 256).min(4096) as u32
+    (input_chars / 2 + 1024).min(8192) as u32
 }
 
 /// Incremental SSE parser. Feed raw network chunks (which may split lines or
@@ -75,6 +76,8 @@ pub struct SseAccumulator {
     pub text: String,
     pub usage: Option<Usage>,
     pub done: bool,
+    /// Last `finish_reason` seen; a reply without "stop" may be truncated.
+    pub finish_reason: Option<String>,
 }
 
 impl SseAccumulator {
@@ -134,12 +137,14 @@ impl SseAccumulator {
         {
             self.text.push_str(content);
         }
-        if choice
+        if let Some(reason) = choice
             .and_then(|c| c.get("finish_reason"))
             .and_then(Value::as_str)
-            == Some("error")
         {
-            return Err("OpenRouter stream ended with finish_reason=error".to_string());
+            if reason == "error" {
+                return Err("OpenRouter stream ended with finish_reason=error".to_string());
+            }
+            self.finish_reason = Some(reason.to_string());
         }
         if let Some(u) = chunk.get("usage").filter(|u| u.is_object()) {
             self.usage = Some(parse_usage(u));
@@ -221,7 +226,15 @@ pub async fn complete(base_url: &str, api_key: &str, body: &Value) -> Result<Str
                 .unwrap_or_else(|| "n/a".into())
         );
     }
-    Ok(acc.text)
+    // Never paste a partial reply: a dropped stream or a max_tokens cut-off
+    // would silently lose the end of the user's dictation.
+    match acc.finish_reason.as_deref() {
+        Some("stop") | Some("end_turn") => Ok(acc.text),
+        other => Err(format!(
+            "OpenRouter reply incomplete (finish_reason={})",
+            other.unwrap_or("none")
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -328,8 +341,17 @@ mod tests {
 
     #[test]
     fn max_tokens_scales_and_caps() {
-        assert_eq!(max_tokens_for(0), 256);
-        assert_eq!(max_tokens_for(1000), 756);
-        assert_eq!(max_tokens_for(100_000), 4096);
+        assert_eq!(max_tokens_for(0), 1024);
+        assert_eq!(max_tokens_for(1000), 1524);
+        assert_eq!(max_tokens_for(100_000), 8192);
+    }
+
+    #[test]
+    fn records_finish_reason() {
+        let mut acc = SseAccumulator::new();
+        acc.feed(b"data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":\"length\"}]}\n\n")
+            .unwrap();
+        assert_eq!(acc.finish_reason.as_deref(), Some("length"));
+        assert_eq!(acc.text, "Hi");
     }
 }

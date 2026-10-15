@@ -67,7 +67,7 @@ pub fn default_rules() -> Vec<AppStyleRule> {
     ]
 }
 
-fn field_value<'a>(ctx: &'a AppContext, field: MatchField) -> Option<&'a str> {
+fn field_value(ctx: &AppContext, field: MatchField) -> Option<&str> {
     match field {
         MatchField::AppName => Some(ctx.app_name.as_str()),
         MatchField::BundleId => ctx.bundle_id.as_deref(),
