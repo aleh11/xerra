@@ -700,18 +700,28 @@ impl ShortcutAction for TranscribeAction {
                             // Xerra: LLM/regex cleanup on the plain transcribe hotkey.
                             let cleanup_enabled =
                                 !post_process && get_settings(&ah).cleanup.enabled;
-                            if post_process || cleanup_enabled {
+                            let cleanup_ctx = if cleanup_enabled {
+                                crate::cleanup::take_context(&binding_id).await
+                            } else {
+                                None
+                            };
+                            // Only show the processing overlay when an LLM call is
+                            // expected (decided on the raw transcript; cheap).
+                            let show_processing = post_process
+                                || (cleanup_enabled
+                                    && crate::cleanup::will_call_llm(
+                                        &get_settings(&ah).cleanup,
+                                        &transcription,
+                                        cleanup_ctx.as_ref(),
+                                    )
+                                    .await);
+                            if show_processing {
                                 if use_streaming_overlay {
                                     tm.emit_stream_working(StreamWorkKind::Polishing);
                                 } else {
                                     show_processing_overlay(&ah);
                                 }
                             }
-                            let cleanup_ctx = if cleanup_enabled {
-                                crate::cleanup::take_context(&binding_id).await
-                            } else {
-                                None
-                            };
                             let Some(processed) = complete_unless_cancelled(
                                 async {
                                     let mut processed = process_transcription_output(
