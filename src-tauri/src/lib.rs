@@ -717,6 +717,7 @@ pub fn run(cli_args: CliArgs) {
             trigger_update_check,
             show_main_window_command,
             cleanup::set_cleanup_settings,
+            cleanup::reset_cleanup_style_rules,
             cleanup::set_cleanup_api_key,
             cleanup::has_cleanup_api_key,
             cleanup::test_cleanup,

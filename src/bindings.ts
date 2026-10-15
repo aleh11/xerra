@@ -551,6 +551,17 @@ async setCleanupSettings(settings: CleanupSettings) : Promise<Result<null, strin
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Restore the built-in app style rules and return the updated settings.
+ */
+async resetCleanupStyleRules() : Promise<Result<CleanupSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_cleanup_style_rules") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async setCleanupApiKey(key: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_cleanup_api_key", { key }) };
@@ -1074,9 +1085,13 @@ long_form_chunking?: boolean;
 overlay_style?: OverlayStyle }
 export type AppStyleRule = { 
 /**
- * Case-insensitive substring.
+ * Case-insensitive substring, or case-insensitive equality when `exact`.
  */
-pattern: string; field: MatchField; style: CleanupStyle }
+pattern: string; field: MatchField; style: CleanupStyle; 
+/**
+ * Match the whole field value instead of a substring.
+ */
+exact?: boolean }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { transcribe: string[]; gpu_devices: GpuDeviceOption[] }
@@ -1094,8 +1109,20 @@ export type CleanupSettings = { enabled?: boolean; base_url?: string; model?: st
 /**
  * One of "none" | "minimal" | "low" | "medium" | "high".
  */
-reasoning_effort?: string; timeout_ms?: number; short_utterance_words?: number; app_style_rules?: AppStyleRule[]; default_style?: CleanupStyle }
-export type CleanupSource = "Llm" | "Regex" | "Unchanged"
+reasoning_effort?: string; timeout_ms?: number; short_utterance_words?: number; app_style_rules?: AppStyleRule[]; default_style?: CleanupStyle; 
+/**
+ * Known terms (names, jargon) always sent to the LLM as vocabulary.
+ */
+dictionary?: string[]; 
+/**
+ * Deterministic replacements applied before the LLM and regex steps.
+ */
+replacements?: Replacement[]; 
+/**
+ * Whole-utterance voice shortcuts; skip the LLM entirely.
+ */
+snippets?: Snippet[] }
+export type CleanupSource = "Llm" | "Regex" | "Unchanged" | "Snippet"
 export type CleanupStyle = "Neutral" | "Casual" | "Formal" | "Code"
 export type CleanupTestResult = { output: string; source: CleanupSource; style: CleanupStyle; latency_ms: number; error: string | null }
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
@@ -1176,6 +1203,10 @@ export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "
 /**
  * A retired ONNX model found on disk.
  */
+/**
+ * "Heard as -> write as" pair for a recurring mis-transcription.
+ */
+export type Replacement = { heard: string; write: string }
 export type RetiredModel = { id: string; name: string; size_mb: number; replacement_repo: string }
 export type SecretMap = Partial<{ [key in string]: string }>
 export type SecureInputStatus = { 
@@ -1229,6 +1260,14 @@ export type ShortcutActivation =
  */
 "hold_or_toggle"
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
+/**
+ * Voice shortcut: saying exactly `trigger` pastes `expansion` verbatim.
+ */
+export type Snippet = { trigger: string; 
+/**
+ * May contain newlines.
+ */
+expansion: string }
 export type SoundTheme = "marimba" | "pop" | "custom"
 /**
  * Phase of the streaming overlay card, emitted to drive its UI state.

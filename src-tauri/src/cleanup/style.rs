@@ -20,6 +20,14 @@ fn rule(pattern: &str, field: MatchField, style: CleanupStyle) -> AppStyleRule {
         pattern: pattern.to_string(),
         field,
         style,
+        exact: false,
+    }
+}
+
+fn exact_rule(pattern: &str, field: MatchField, style: CleanupStyle) -> AppStyleRule {
+    AppStyleRule {
+        exact: true,
+        ..rule(pattern, field, style)
     }
 }
 
@@ -34,6 +42,10 @@ pub fn default_rules() -> Vec<AppStyleRule> {
         // Code
         rule("Visual Studio Code", AppName, Code),
         rule("com.microsoft.VSCode", BundleId, Code),
+        // Windows exe `Code.exe` and Linux WM_CLASS "Code"/"code".
+        exact_rule("Code", AppName, Code),
+        exact_rule("code.exe", BundleId, Code),
+        exact_rule("code", BundleId, Code),
         rule("Cursor", AppName, Code),
         rule("Zed", AppName, Code),
         rule("dev.zed", BundleId, Code),
@@ -86,7 +98,8 @@ pub fn resolve_style(settings: &CleanupSettings, ctx: Option<&AppContext>) -> Cl
             continue;
         }
         if let Some(value) = field_value(ctx, r.field) {
-            if value.to_lowercase().contains(&r.pattern.to_lowercase()) {
+            let (v, p) = (value.to_lowercase(), r.pattern.to_lowercase());
+            if (r.exact && v == p) || (!r.exact && v.contains(&p)) {
                 return r.style;
             }
         }
@@ -131,6 +144,18 @@ mod tests {
         assert_eq!(
             style(&ctx("Electron", Some("com.microsoft.VSCode"), None)),
             CleanupStyle::Code
+        );
+    }
+
+    #[test]
+    fn vscode_windows_and_linux_exact() {
+        assert_eq!(style(&ctx("Code", None, None)), CleanupStyle::Code);
+        assert_eq!(style(&ctx("x", Some("code.exe"), None)), CleanupStyle::Code);
+        assert_eq!(style(&ctx("x", Some("Code"), None)), CleanupStyle::Code);
+        // Exact: a different app merely containing "code" is not matched.
+        assert_eq!(
+            style(&ctx("Barcode Scanner", None, None)),
+            CleanupStyle::Neutral
         );
     }
 

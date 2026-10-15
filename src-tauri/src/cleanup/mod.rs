@@ -5,6 +5,7 @@
 
 mod keychain;
 mod openrouter;
+mod personal;
 mod regex_fallback;
 mod style;
 
@@ -42,10 +43,28 @@ pub enum MatchField {
 
 #[derive(Serialize, Deserialize, Type, Clone, Debug, PartialEq)]
 pub struct AppStyleRule {
-    /// Case-insensitive substring.
+    /// Case-insensitive substring, or case-insensitive equality when `exact`.
     pub pattern: String,
     pub field: MatchField,
     pub style: CleanupStyle,
+    /// Match the whole field value instead of a substring.
+    #[serde(default)]
+    pub exact: bool,
+}
+
+/// "Heard as -> write as" pair for a recurring mis-transcription.
+#[derive(Serialize, Deserialize, Type, Clone, Debug, PartialEq)]
+pub struct Replacement {
+    pub heard: String,
+    pub write: String,
+}
+
+/// Voice shortcut: saying exactly `trigger` pastes `expansion` verbatim.
+#[derive(Serialize, Deserialize, Type, Clone, Debug, PartialEq)]
+pub struct Snippet {
+    pub trigger: String,
+    /// May contain newlines.
+    pub expansion: String,
 }
 
 #[derive(Serialize, Deserialize, Type, Clone, Debug)]
@@ -60,6 +79,12 @@ pub struct CleanupSettings {
     pub short_utterance_words: u32,
     pub app_style_rules: Vec<AppStyleRule>,
     pub default_style: CleanupStyle,
+    /// Known terms (names, jargon) always sent to the LLM as vocabulary.
+    pub dictionary: Vec<String>,
+    /// Deterministic replacements applied before the LLM and regex steps.
+    pub replacements: Vec<Replacement>,
+    /// Whole-utterance voice shortcuts; skip the LLM entirely.
+    pub snippets: Vec<Snippet>,
 }
 
 impl Default for CleanupSettings {
@@ -73,6 +98,9 @@ impl Default for CleanupSettings {
             short_utterance_words: 8,
             app_style_rules: style::default_rules(),
             default_style: CleanupStyle::Neutral,
+            dictionary: Vec::new(),
+            replacements: Vec::new(),
+            snippets: Vec::new(),
         }
     }
 }
@@ -82,6 +110,7 @@ pub enum CleanupSource {
     Llm,
     Regex,
     Unchanged,
+    Snippet,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +208,58 @@ pub async fn run(
     run_inner(settings, raw, ctx, terms, None, false).await
 }
 
+/// What the pipeline will do with an utterance, decided without any I/O.
+enum Plan {
+    /// Final text, no LLM call.
+    Done(String, CleanupSource),
+    /// Call the LLM with `text` (replacements applied); `regex_text` is the fallback.
+    Llm { text: String, regex_text: String },
+}
+
+fn plan(settings: &CleanupSettings, raw: &str, style: CleanupStyle, force_llm: bool) -> Plan {
+    if raw.trim().is_empty() {
+        return Plan::Done(raw.to_string(), CleanupSource::Unchanged);
+    }
+    let active = force_llm || settings.enabled;
+    if active {
+        if let Some(expansion) = personal::match_snippet(&settings.snippets, raw) {
+            return Plan::Done(expansion.to_string(), CleanupSource::Snippet);
+        }
+    }
+    let text = if active {
+        personal::apply_replacements(raw, &settings.replacements)
+    } else {
+        raw.to_string()
+    };
+    let regex_text = regex_cleanup(&text);
+    // Filler-only input: pasting nothing is correct.
+    if regex_text.is_empty() {
+        return Plan::Done(regex_text, CleanupSource::Regex);
+    }
+    if !force_llm {
+        if !settings.enabled {
+            return Plan::Done(text, CleanupSource::Unchanged);
+        }
+        let short = word_count(&text) < settings.short_utterance_words as usize;
+        if short && style != CleanupStyle::Code {
+            return Plan::Done(regex_text, CleanupSource::Regex);
+        }
+    }
+    Plan::Llm { text, regex_text }
+}
+
+/// Whether `run` will call the LLM for this utterance (used to decide if the
+/// processing overlay is worth showing).
+pub async fn will_call_llm(
+    settings: &CleanupSettings,
+    text: &str,
+    ctx: Option<&AppContext>,
+) -> bool {
+    let style = resolve_style(settings, ctx);
+    matches!(plan(settings, text, style, false), Plan::Llm { .. })
+        && keychain::get_api_key_async().await.is_some()
+}
+
 async fn run_inner(
     settings: &CleanupSettings,
     raw: &str,
@@ -189,38 +270,24 @@ async fn run_inner(
 ) -> CleanupOutcome {
     let start = Instant::now();
     let style = style_override.unwrap_or_else(|| resolve_style(settings, ctx));
-
-    if raw.trim().is_empty() {
-        return outcome(raw.to_string(), CleanupSource::Unchanged, start, None);
-    }
-    let regex_text = regex_cleanup(raw);
-    // Filler-only input: pasting nothing is correct.
-    if regex_text.is_empty() {
-        return outcome(regex_text, CleanupSource::Regex, start, None);
-    }
-
-    if !force_llm {
-        if !settings.enabled {
-            return outcome(raw.to_string(), CleanupSource::Unchanged, start, None);
-        }
-        let short = word_count(raw) < settings.short_utterance_words as usize;
-        if short && style != CleanupStyle::Code {
-            return outcome(regex_text, CleanupSource::Regex, start, None);
-        }
-    }
+    let (text, regex_text) = match plan(settings, raw, style, force_llm) {
+        Plan::Done(text, source) => return outcome(text, source, start, None),
+        Plan::Llm { text, regex_text } => (text, regex_text),
+    };
+    let terms = personal::merge_terms(&settings.dictionary, terms, &settings.replacements);
 
     let Some(api_key) = keychain::get_api_key_async().await else {
         let err = force_llm.then(|| "No OpenRouter API key configured".to_string());
         return outcome(regex_text, CleanupSource::Regex, start, err);
     };
 
-    let user_message = build_user_message(style, ctx, terms, raw);
+    let user_message = build_user_message(style, ctx, &terms, &text);
     let body = openrouter::build_request_body(
         &settings.model,
         &settings.reasoning_effort,
         SYSTEM_PROMPT,
         &user_message,
-        openrouter::max_tokens_for(raw.chars().count()),
+        openrouter::max_tokens_for(text.chars().count()),
     );
     let call = openrouter::complete(&settings.base_url, &api_key, &body);
     let result =
@@ -229,11 +296,11 @@ async fn run_inner(
     let failure = match result {
         Err(_) => format!("LLM cleanup timed out after {} ms", settings.timeout_ms),
         Ok(Err(e)) => e,
-        Ok(Ok(text)) => {
-            let cleaned = sanitize_llm_output(&text, raw);
+        Ok(Ok(reply)) => {
+            let cleaned = sanitize_llm_output(&reply, &text);
             if cleaned.is_empty() {
                 "LLM returned empty output".to_string()
-            } else if is_suspicious(&cleaned, raw) {
+            } else if is_suspicious(&cleaned, &text) {
                 "LLM output rejected (much longer than input)".to_string()
             } else {
                 return outcome(cleaned, CleanupSource::Llm, start, None);
@@ -320,10 +387,37 @@ pub fn set_cleanup_settings(app: AppHandle, settings: CleanupSettings) -> Result
     if settings.timeout_ms == 0 {
         return Err("timeout_ms must be greater than 0".to_string());
     }
+    let mut settings = settings;
+    sanitize_personal(&mut settings);
     let mut app_settings = crate::settings::get_settings(&app);
     app_settings.cleanup = settings;
     crate::settings::write_settings(&app, app_settings);
     Ok(())
+}
+
+/// Trim and drop unusable dictionary, replacement and snippet entries.
+fn sanitize_personal(s: &mut CleanupSettings) {
+    s.dictionary = personal::merge_terms(&s.dictionary, &[], &[]);
+    s.replacements.retain_mut(|r| {
+        r.heard = r.heard.trim().to_string();
+        r.write = r.write.trim().to_string();
+        !r.heard.is_empty()
+    });
+    s.snippets.retain_mut(|sn| {
+        sn.trigger = sn.trigger.trim().to_string();
+        !personal::normalize_utterance(&sn.trigger).is_empty() && !sn.expansion.is_empty()
+    });
+}
+
+/// Restore the built-in app style rules and return the updated settings.
+#[tauri::command]
+#[specta::specta]
+pub fn reset_cleanup_style_rules(app: AppHandle) -> Result<CleanupSettings, String> {
+    let mut app_settings = crate::settings::get_settings(&app);
+    app_settings.cleanup.app_style_rules = style::default_rules();
+    let cleanup = app_settings.cleanup.clone();
+    crate::settings::write_settings(&app, app_settings);
+    Ok(cleanup)
 }
 
 #[tauri::command]
@@ -350,6 +444,7 @@ pub struct CleanupTestResult {
 }
 
 /// Run cleanup on sample text, forcing the LLM path (no short-utterance bypass).
+/// Snippets and replacements apply as in real use.
 #[tauri::command]
 #[specta::specta]
 pub async fn test_cleanup(
@@ -455,6 +550,57 @@ mod tests {
     fn suspicious_length() {
         assert!(!is_suspicious("short", "short"));
         assert!(is_suspicious(&"x".repeat(300), "hi"));
+    }
+
+    #[test]
+    fn vocabulary_line_merges_dictionary_and_custom_words() {
+        let s = CleanupSettings {
+            dictionary: vec!["Mimic".into(), "JSONata".into()],
+            replacements: vec![Replacement {
+                heard: "you be cron".into(),
+                write: "Ubikron".into(),
+            }],
+            ..Default::default()
+        };
+        let terms = personal::merge_terms(
+            &s.dictionary,
+            &["mimic".into(), "Tauri".into()],
+            &s.replacements,
+        );
+        let m = build_user_message(CleanupStyle::Neutral, None, &terms, "x");
+        assert!(m.contains("VOCABULARY: Mimic, JSONata, Tauri, Ubikron\n"));
+    }
+
+    #[tokio::test]
+    async fn snippet_pastes_verbatim_and_miss_falls_through() {
+        let mut s = CleanupSettings {
+            snippets: vec![Snippet {
+                trigger: "my email address".into(),
+                expansion: "me@x.com\nBest".into(),
+            }],
+            ..Default::default()
+        };
+        let o = run(&s, "Um, my email address.", None, &[]).await;
+        assert_eq!(o.source, CleanupSource::Snippet);
+        assert_eq!(o.text, "me@x.com\nBest");
+        let o = run(&s, "send my email address", None, &[]).await;
+        assert_eq!(o.source, CleanupSource::Regex);
+        s.enabled = false;
+        let o = run(&s, "my email address", None, &[]).await;
+        assert_eq!(o.source, CleanupSource::Unchanged);
+    }
+
+    #[tokio::test]
+    async fn replacements_apply_before_regex() {
+        let s = CleanupSettings {
+            replacements: vec![Replacement {
+                heard: "you be cron".into(),
+                write: "Ubikron".into(),
+            }],
+            ..Default::default()
+        };
+        let o = run(&s, "um you be cron rocks", None, &[]).await;
+        assert_eq!(o.text, "Ubikron rocks.");
     }
 
     #[test]
