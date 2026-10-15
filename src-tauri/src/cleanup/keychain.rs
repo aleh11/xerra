@@ -18,7 +18,7 @@ fn service_name() -> String {
     serde_json::from_str::<serde_json::Value>(CONF)
         .ok()
         .and_then(|v| v.get("identifier")?.as_str().map(str::to_owned))
-        .unwrap_or_else(|| "com.pais.handy".to_string())
+        .unwrap_or_else(|| "dev.alehh.xerra".to_string())
 }
 
 fn entry() -> Result<keyring::Entry, keyring::Error> {
