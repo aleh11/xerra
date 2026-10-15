@@ -1,4 +1,43 @@
-# Handy
+# Xerra
+
+Xerra is a fork of [Handy](https://github.com/cjpais/Handy) by CJ Pais (MIT License): offline, push-to-talk speech-to-text for the desktop, plus an optional **LLM cleanup** pass through [OpenRouter](https://openrouter.ai) and **app-aware styles** (the cleanup tone adapts to the app you are dictating into).
+
+## Install
+
+Download the installer for your platform from the [Releases page](https://github.com/aleh11/xerra/releases):
+
+- **macOS (Apple Silicon)**: `.dmg`
+- **Windows**: `.exe` (NSIS) or `.msi`
+- **Linux**: `.AppImage`, `.deb` or `.rpm`
+
+Xerra updates itself from the same Releases page (Settings → About).
+
+### macOS: unsigned builds and Gatekeeper
+
+Releases are not notarized by Apple, so macOS quarantines the first launch ("Xerra is damaged" or "cannot be opened"). Either right-click the app in Applications and choose **Open**, or remove the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Xerra.app
+```
+
+### Permissions
+
+- **Microphone**: needed to record your voice.
+- **Accessibility** (macOS): needed for global shortcuts and to paste the transcription into other apps. Grant it under System Settings → Privacy & Security → Accessibility.
+
+### LLM cleanup
+
+Open **Settings → Cleanup** and enter your OpenRouter API key. The key is stored in the OS keychain. Without a key (or when offline) Xerra falls back to basic local cleanup.
+
+Maintainers: see [docs/RELEASING.md](docs/RELEASING.md) for how releases are built.
+
+---
+
+# Upstream Handy README
+
+The text below is the original Handy README, kept for reference. Build instructions, troubleshooting and platform notes still apply; names like "Handy" and the `handy.computer` links refer to the upstream project.
+
+## Handy
 
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
 

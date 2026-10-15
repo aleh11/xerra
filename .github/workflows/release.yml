@@ -1,6 +1,23 @@
 name: "Release"
 
-on: workflow_dispatch
+# Builds every platform and attaches the installers, the signed updater
+# bundles and latest.json to a DRAFT GitHub Release `v<version>` (version from
+# src-tauri/tauri.conf.json). Review the draft, then publish it by hand.
+#
+# Trigger: Actions -> Release -> Run workflow, or push a `v*` tag. Both paths
+# funnel through the same job, which reuses an existing draft for the tag
+# instead of creating a second release (so re-runs and tag pushes are safe).
+# See docs/RELEASING.md.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   create-release:
@@ -18,20 +35,52 @@ jobs:
         id: get-version
         shell: bash
         run: |
-          VERSION=$(grep -o '"version": "[^"]*"' src-tauri/tauri.conf.json | cut -d'"' -f4)
+          VERSION=$(grep -o '"version": "[^"]*"' src-tauri/tauri.conf.json | head -n1 | cut -d'"' -f4)
           echo "Application version from tauri.conf.json: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Create Draft Release
+      - name: Check versions are in sync
+        shell: bash
+        run: |
+          conf='${{ steps.get-version.outputs.version }}'
+          pkg=$(grep -m1 '"version"' package.json | cut -d'"' -f4)
+          crate=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          echo "tauri.conf.json=$conf package.json=$pkg Cargo.toml=$crate"
+          if [ -z "$conf" ] || [ "$conf" != "$pkg" ] || [ "$conf" != "$crate" ]; then
+            echo "::error::Version mismatch between tauri.conf.json, package.json and src-tauri/Cargo.toml"
+            exit 1
+          fi
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "v$conf" ]; then
+            echo "::error::Tag ${{ github.ref_name }} does not match app version v$conf"
+            exit 1
+          fi
+
+      - name: Create or reuse draft release
         id: create-release
         uses: actions/github-script@v9
         with:
           script: |
+            const tag = `v${{ steps.get-version.outputs.version }}`
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            })
+            const existing = releases.find((r) => r.tag_name === tag)
+            if (existing) {
+              if (!existing.draft) {
+                core.setFailed(`Release ${tag} is already published. Bump the version before releasing again.`)
+                return
+              }
+              core.info(`Reusing existing draft release ${tag} (id ${existing.id})`)
+              return existing.id
+            }
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: `v${{ steps.get-version.outputs.version }}`,
-              name: `v${{ steps.get-version.outputs.version }}`,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name: tag,
               draft: true,
               prerelease: false,
               generate_release_notes: true
@@ -49,7 +98,7 @@ jobs:
           - platform: "macos-26" # for Arm based macs (M1 and above). Uses macOS 26 for Apple Intelligence SDK.
             args: "--target aarch64-apple-darwin"
             target: "aarch64-apple-darwin"
-          - platform: "macos-latest" # for Intel based macs.
+          - platform: "macos-latest" # for Intel based macs (cross-compiled on the Apple Silicon runner).
             args: "--target x86_64-apple-darwin"
             target: "x86_64-apple-darwin"
           - platform: "ubuntu-22.04" # Build .deb on 22.04
@@ -74,7 +123,7 @@ jobs:
       target: ${{ matrix.target }}
       build-args: ${{ matrix.args }}
       sign-binaries: true
-      asset-prefix: "handy"
+      asset-prefix: "xerra"
       upload-artifacts: false
       release-id: ${{ needs.create-release.outputs.release-id }}
       # Releases always build from scratch — never restore the Rust cache, so a
