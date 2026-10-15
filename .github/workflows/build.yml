@@ -19,7 +19,7 @@ on:
       asset-prefix:
         required: false
         type: string
-        default: "handy"
+        default: "xerra"
       asset-name-pattern:
         required: false
         type: string
@@ -51,11 +51,26 @@ on:
 env:
   TSC_VERSION: "0.9.0"
 
+# Signing is optional. Every secret below may be absent (e.g. on a fork); the
+# matching signing step is then skipped and the build proceeds unsigned.
+#
+#   Updater signing (always wanted for releases):
+#     TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD (may be empty)
+#   macOS code signing:  APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, KEYCHAIN_PASSWORD
+#   macOS notarization:  APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+#   Windows (Azure Trusted Signing): AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+#     AZURE_TENANT_ID + repo variables AZURE_SIGNING_ENDPOINT/_ACCOUNT/_PROFILE
+
 jobs:
   build:
     permissions:
       contents: write
     runs-on: ${{ inputs.platform }}
+    env:
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      HAS_APPLE_CERT: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.KEYCHAIN_PASSWORD != '' }}
+      HAS_APPLE_NOTARY: ${{ inputs.sign-binaries && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+      HAS_AZURE_SIGNING: ${{ inputs.sign-binaries && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_TENANT_ID != '' && vars.AZURE_SIGNING_ENDPOINT != '' && vars.AZURE_SIGNING_ACCOUNT != '' && vars.AZURE_SIGNING_PROFILE != '' }}
     steps:
       # Kept for git checkout and general tooling headroom. The native
       # transcribe-cpp-sys build no longer needs path help: since 0.1.3 its
@@ -164,7 +179,7 @@ jobs:
           cache: true
 
       - name: Cache trusted-signing-cli
-        if: contains(inputs.platform, 'windows') && inputs.sign-binaries
+        if: contains(inputs.platform, 'windows') && env.HAS_AZURE_SIGNING == 'true'
         id: cache-tsc
         uses: actions/cache@v5
         with:
@@ -172,7 +187,7 @@ jobs:
           key: trusted-signing-cli-${{ env.TSC_VERSION }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install trusted-signing-cli
-        if: contains(inputs.platform, 'windows') && inputs.sign-binaries && steps.cache-tsc.outputs.cache-hit != 'true'
+        if: contains(inputs.platform, 'windows') && env.HAS_AZURE_SIGNING == 'true' && steps.cache-tsc.outputs.cache-hit != 'true'
         run: cargo install --locked --force trusted-signing-cli@${{ env.TSC_VERSION }}
 
       - name: Prepare Vulkan SDK for Ubuntu 24.04
@@ -219,13 +234,13 @@ jobs:
         run: rustup target add ${{ inputs.target }}
 
       - name: import Apple Developer Certificate
-        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        if: contains(inputs.platform, 'macos') && env.HAS_APPLE_CERT == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -235,9 +250,13 @@ jobs:
           security find-identity -v -p codesigning build.keychain
 
       - name: verify certificate
-        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        if: contains(inputs.platform, 'macos') && env.HAS_APPLE_CERT == 'true'
         run: |
-          CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application")
+          CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" || true)
+          if [ -z "$CERT_INFO" ]; then
+            echo "::error::APPLE_CERTIFICATE does not contain a 'Developer ID Application' identity"
+            exit 1
+          fi
           CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
           echo "CERT_ID=$CERT_ID" >> $GITHUB_ENV
           echo "Certificate imported."
@@ -299,7 +318,7 @@ jobs:
           #     statically linking libomp.
           echo "TRANSCRIBE_CMAKE_ARGS=-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF" >> $env:GITHUB_ENV
 
-      # Bundle the VC++ runtime app-local so Handy starts on machines without a
+      # Bundle the VC++ runtime app-local so Xerra starts on machines without a
       # current Microsoft redistributable. build.rs stages DLLs from these dirs
       # into transcribe-libs/, using the same VS install that compiled the code.
       # x64 also needs vcomp140.dll for ggml OpenMP; ARM64 disables OpenMP.
@@ -385,7 +404,7 @@ jobs:
       # transcribe-cpp-sys's CMake install during the cargo build, but nothing
       # ships them. Pre-build the app so that install dir exists, then expose it
       # via LD_LIBRARY_PATH so the AppImage's linuxdeploy can resolve
-      # libtranscribe.so (a NEEDED of `handy`) while bundling. tauri-action
+      # libtranscribe.so (a NEEDED of `xerra`) while bundling. tauri-action
       # reuses this compile incrementally. build.rs stages the runtime and
       # dlopen'd modules into transcribe-libs/, which tauri.conf.json includes.
       - name: Pre-build and locate transcribe-cpp backend libs (Linux)
@@ -414,7 +433,7 @@ jobs:
           echo "Located transcribe-cpp libs in: $LIBDIR"
           ls -la "$LIBDIR"
           echo "LD_LIBRARY_PATH=$LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
-          # linuxdeploy resolves `handy`'s NEEDED libs via `ldd` and HARD-FAILS
+          # linuxdeploy resolves `xerra`'s NEEDED libs via `ldd` and HARD-FAILS
           # on an unresolved one (it does not warn-and-skip). libtranscribe.so
           # lives only in the cargo build tree, so also publish it (and the ggml
           # libs it pulls in) to the system linker cache — belt-and-suspenders
@@ -446,22 +465,85 @@ jobs:
           chmod +x "$tools_dir/linuxdeploy-${arch}.AppImage"
           "$tools_dir/linuxdeploy-${arch}.AppImage" --appimage-extract-and-run --version
 
+      # Decide which signing features this build can use and expose ONLY those
+      # to the Tauri step. Setting an empty APPLE_*/AZURE_* variable can make
+      # the bundler attempt (and fail) signing, so absent secrets are simply
+      # never exported. Overrides that cannot live in tauri.conf.json (it is
+      # static) go into a generated, git-ignored config merged via --config.
+      - name: Configure signing
+        id: signing
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID_IN: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_IN: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_IN: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_CLIENT_ID_IN: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET_IN: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID_IN: ${{ secrets.AZURE_TENANT_ID }}
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          AZURE_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          set -euo pipefail
+          export_env() { # name value (multi-line safe)
+            local delim="EOF_$(date +%s%N)_$RANDOM"
+            { echo "$1<<$delim"; printf '%s\n' "$2"; echo "$delim"; } >> "$GITHUB_ENV"
+          }
+
+          overrides='{}'
+
+          # --- Updater signature (separate from OS code signing) ---
+          if [ "$HAS_UPDATER_KEY" = "true" ]; then
+            export_env TAURI_SIGNING_PRIVATE_KEY "$UPDATER_KEY"
+            # An empty password is valid; the variable must still exist.
+            export_env TAURI_SIGNING_PRIVATE_KEY_PASSWORD "${UPDATER_KEY_PASSWORD:-}"
+            echo "Updater signing: enabled"
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building WITHOUT updater artifacts (no .sig files, no latest.json). In-app auto-update will not work for this build. See docs/RELEASING.md."
+            overrides='{"bundle":{"createUpdaterArtifacts":false}}'
+          fi
+
+          # --- macOS signing / notarization ---
+          if [ "$HAS_APPLE_CERT" = "true" ]; then
+            export_env APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
+            export_env APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+            export_env APPLE_SIGNING_IDENTITY "${CERT_ID:-}"
+            echo "Apple code signing: enabled"
+            if [ "$HAS_APPLE_NOTARY" = "true" ]; then
+              export_env APPLE_ID "$APPLE_ID_IN"
+              export_env APPLE_PASSWORD "$APPLE_PASSWORD_IN"
+              export_env APPLE_TEAM_ID "$APPLE_TEAM_ID_IN"
+              echo "Apple notarization: enabled"
+            else
+              echo "Apple notarization: skipped (APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID not all set)"
+            fi
+          elif [ "${{ contains(inputs.platform, 'macos') }}" = "true" ]; then
+            echo "::notice::No Apple certificate configured: macOS build is ad-hoc signed and not notarized (users must bypass Gatekeeper)."
+          fi
+
+          # --- Windows signing (Azure Trusted Signing) ---
+          if [ "$HAS_AZURE_SIGNING" = "true" ]; then
+            export_env AZURE_CLIENT_ID "$AZURE_CLIENT_ID_IN"
+            export_env AZURE_CLIENT_SECRET "$AZURE_CLIENT_SECRET_IN"
+            export_env AZURE_TENANT_ID "$AZURE_TENANT_ID_IN"
+            sign_cmd="trusted-signing-cli -e $AZURE_ENDPOINT -a $AZURE_ACCOUNT -c $AZURE_PROFILE -d Xerra %1"
+            overrides="$(OV="$overrides" CMD="$sign_cmd" bun -e 'const o=JSON.parse(process.env.OV);o.bundle={...(o.bundle||{}),windows:{signCommand:process.env.CMD}};console.log(JSON.stringify(o))')"
+            echo "Windows signing: enabled"
+          elif [ "${{ contains(inputs.platform, 'windows') }}" = "true" ]; then
+            echo "::notice::No Azure signing configured: Windows installer is unsigned (SmartScreen will warn)."
+          fi
+
+          echo "$overrides" > src-tauri/tauri.ci.conf.json
+          echo "CI config override: $overrides"
+
       - name: Build with Tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ${{ inputs.sign-binaries && secrets.APPLE_ID || '' }}
-          APPLE_ID_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_ID_PASSWORD || '' }}
-          APPLE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ inputs.sign-binaries && secrets.APPLE_TEAM_ID || '' }}
-          APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
-          AZURE_CLIENT_ID: ${{ inputs.sign-binaries && secrets.AZURE_CLIENT_ID || '' }}
-          AZURE_CLIENT_SECRET: ${{ inputs.sign-binaries && secrets.AZURE_CLIENT_SECRET || '' }}
-          AZURE_TENANT_ID: ${{ inputs.sign-binaries && secrets.AZURE_TENANT_ID || '' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-binaries && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.sign-binaries && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           # The Vulkan loader and Wayland client library must come from the host
           # graphics stack. Bundling Ubuntu's copies ahead of the system libraries can
           # prevent a newer distro's Vulkan ICD or Mesa stack from loading.
@@ -477,7 +559,7 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
-          args: ${{ inputs.build-args }}
+          args: ${{ inputs.build-args }} --config src-tauri/tauri.ci.conf.json
 
       # tauri-action uploads release assets before returning. All AppImage
       # filtering therefore happens inside linuxdeploy above; this verifies the
@@ -529,7 +611,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The runtime smoke test launches the packaged handy binary, which links
+          # The runtime smoke test launches the packaged xerra binary, which links
           # GTK (via tao) even for the headless --list-devices path and therefore
           # needs a display to start. CI runners are headless, so provide a virtual
           # X server via xvfb-run.
@@ -566,7 +648,7 @@ jobs:
             local root="$1"
             local label="$2"
             local vulkan_icd="${3:-}"
-            # Run under a virtual X server: handy initializes GTK on startup even
+            # Run under a virtual X server: xerra initializes GTK on startup even
             # on the headless --list-devices path, which fails without a display.
             # An AppImage audit supplies Mesa's software ICD so GPU registration
             # is deterministic even on a runner without physical graphics.
@@ -574,9 +656,9 @@ jobs:
               export VK_ICD_FILENAMES="$vulkan_icd"
             fi
             HANDY_NO_GTK_LAYER_SHELL=1 \
-            LD_LIBRARY_PATH="${root}/usr/lib/Handy:${root}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
-              xvfb-run -a "${root}/usr/bin/handy" --list-devices \
-                >/tmp/handy-package-smoke.log 2>&1
+            LD_LIBRARY_PATH="${root}/usr/lib/Xerra:${root}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+              xvfb-run -a "${root}/usr/bin/xerra" --list-devices \
+                >/tmp/xerra-package-smoke.log 2>&1
             echo "${label} --list-devices smoke passed"
           }
 
@@ -585,12 +667,12 @@ jobs:
               echo "Auditing deb package: ${deb}"
               listing="$(mktemp)"
               dpkg-deb -c "$deb" > "$listing"
-              require_pattern "$listing" 'usr/bin/handy$' "handy binary"
-              require_pattern "$listing" 'usr/lib/Handy/libtranscribe\.so(\.[0-9]+)+$' "transcribe runtime library (SONAME)"
-              require_pattern "$listing" 'usr/lib/Handy/libggml-cpu.*\.so' "ggml CPU backend module"
-              # Handy's libs must stay out of the ldconfig-scanned /usr/lib
-              # (issue #1639): app-private libs belong in /usr/lib/Handy only.
-              # `[^/]+` excludes the Handy/ subdir, so only direct hits match.
+              require_pattern "$listing" 'usr/bin/xerra$' "xerra binary"
+              require_pattern "$listing" 'usr/lib/Xerra/libtranscribe\.so(\.[0-9]+)+$' "transcribe runtime library (SONAME)"
+              require_pattern "$listing" 'usr/lib/Xerra/libggml-cpu.*\.so' "ggml CPU backend module"
+              # Xerra's libs must stay out of the ldconfig-scanned /usr/lib
+              # (issue #1639): app-private libs belong in /usr/lib/Xerra only.
+              # `[^/]+` excludes the Xerra/ subdir, so only direct hits match.
               if grep -Eq 'usr/lib/[^/]+\.so' "$listing"; then
                 echo "ERROR: libraries installed directly into /usr/lib (issue #1639):" >&2
                 grep -E 'usr/lib/[^/]+\.so' "$listing" >&2
@@ -612,9 +694,9 @@ jobs:
               echo "Auditing rpm package: ${rpm_pkg}"
               listing="$(mktemp)"
               rpm -qpl "$rpm_pkg" > "$listing"
-              require_pattern "$listing" '/usr/bin/handy$' "handy binary"
-              require_pattern "$listing" '/usr/lib/Handy/libtranscribe\.so(\.[0-9]+)+$' "transcribe runtime library (SONAME)"
-              require_pattern "$listing" '/usr/lib/Handy/libggml-cpu.*\.so' "ggml CPU backend module"
+              require_pattern "$listing" '/usr/bin/xerra$' "xerra binary"
+              require_pattern "$listing" '/usr/lib/Xerra/libtranscribe\.so(\.[0-9]+)+$' "transcribe runtime library (SONAME)"
+              require_pattern "$listing" '/usr/lib/Xerra/libggml-cpu.*\.so' "ggml CPU backend module"
               # Same /usr/lib pollution guard as the deb audit (issue #1639).
               if grep -Eq 'usr/lib/[^/]+\.so' "$listing"; then
                 echo "ERROR: libraries installed directly into /usr/lib (issue #1639):" >&2
@@ -629,12 +711,12 @@ jobs:
             for appimage in "${BUNDLE_DIR}"/appimage/*.AppImage; do
               echo "Auditing AppImage package: ${appimage}"
               workdir="$(mktemp -d)"
-              cp "$appimage" "${workdir}/Handy.AppImage"
-              chmod +x "${workdir}/Handy.AppImage"
+              cp "$appimage" "${workdir}/Xerra.AppImage"
+              chmod +x "${workdir}/Xerra.AppImage"
               (
                 cd "$workdir"
-                ./Handy.AppImage --appimage-extract >/dev/null
-                require_path "squashfs-root/usr/bin/handy" "AppImage handy binary"
+                ./Xerra.AppImage --appimage-extract >/dev/null
+                require_path "squashfs-root/usr/bin/xerra" "AppImage xerra binary"
                 # Gear Lever and other integration tools consume the root entry;
                 # appimagetool does not update the copy under usr/share/applications.
                 desktop_file="$(find squashfs-root -maxdepth 1 -type f -name '*.desktop' -print -quit)"
@@ -680,9 +762,9 @@ jobs:
                 # llvmpipe is intentionally not exposed as a compute device by
                 # ggml, but reaching this log proves the module loaded against a
                 # usable system Vulkan loader/ICD instead of failing silently.
-                if ! grep -q 'load_backend: loaded Vulkan backend' /tmp/handy-package-smoke.log; then
+                if ! grep -q 'load_backend: loaded Vulkan backend' /tmp/xerra-package-smoke.log; then
                   echo "ERROR: AppImage could not initialize its Vulkan backend with a usable system ICD" >&2
-                  cat /tmp/handy-package-smoke.log >&2
+                  cat /tmp/xerra-package-smoke.log >&2
                   exit 1
                 fi
               )
@@ -742,9 +824,9 @@ jobs:
           function Assert-PackageContents {
             param([string]$Root, [string]$Label)
 
-            $handy = Get-ChildItem $Root -Filter "handy.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $handy) {
-              throw "$Label package is missing handy.exe"
+            $xerra = Get-ChildItem $Root -Filter "xerra.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $xerra) {
+              throw "$Label package is missing xerra.exe"
             }
             foreach ($dll in $stagedDlls) {
               if (-not (Get-ChildItem $Root -Filter $dll.Name -Recurse -ErrorAction SilentlyContinue)) {
@@ -752,10 +834,10 @@ jobs:
               }
             }
 
-            $deviceOutput = (& $handy.FullName --list-devices | Out-String)
+            $deviceOutput = (& $xerra.FullName --list-devices | Out-String)
             $deviceOutput | Write-Host
             if ($LASTEXITCODE -ne 0) {
-              throw "$Label handy.exe --list-devices failed"
+              throw "$Label xerra.exe --list-devices failed"
             }
             if ("${{ inputs.target }}" -like "aarch64*" -and $deviceOutput -match "kind=(vulkan|cuda|metal|gpu)") {
               throw "$Label Windows ARM64 package unexpectedly exposed a GPU compute device"
