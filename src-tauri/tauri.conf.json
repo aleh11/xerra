@@ -79,7 +79,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDREQzk4MTk0ODdFMjVFNTMKUldSVFh1S0hsSUhKVFFSWDlIbnlTUTBvQzVudWgwVlBSZkMxWWhuWnU0Sk0rQ0orbjd5UzkxWXgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg3NUFDRUUxN0UzOUY3MzMKUldRejl6bCs0YzVhaDNvVHFVcHZuUmk0TzhpM2VGTURGU2piM1dDVHhONlphNVloUHZHRkZKUE4K",
       "endpoints": [
         "https://github.com/aleh11/xerra/releases/latest/download/latest.json"
       ]
